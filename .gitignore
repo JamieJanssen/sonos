@@ -1,0 +1,6 @@
+.venv/
+credentials.py
+profile/
+__pycache__/
+*.png
+*.html
