@@ -221,23 +221,62 @@ class SonosController:
     def _close_station_detail_if_open(self):
         about = self.page.get_by_text("About", exact=True)
 
-        if about.count() == 0:
-            return
-
         try:
-            if about.first.is_visible():
-                self.page.keyboard.press("Escape")
+            if about.count() == 0 or not about.first.is_visible():
+                return
+
+            # Prefer the actual Close button in the station detail overlay.
+            detail = None
+
+            for level in range(1, 9):
+                candidate = about.first.locator(
+                    f"xpath=ancestor::*[{level}]"
+                )
+
                 try:
-                    about.first.wait_for(
-                        state="hidden",
-                        timeout=3000,
-                    )
+                    buttons = candidate.locator("button")
+                    if buttons.count() >= 1:
+                        detail = candidate
                 except Exception:
                     pass
+
+            if detail is not None:
+                buttons = detail.locator("button")
+
+                for i in range(buttons.count()):
+                    button = buttons.nth(i)
+                    aria = (button.get_attribute("aria-label") or "").lower()
+                    title = (button.get_attribute("title") or "").lower()
+
+                    if "close" in aria or "close" in title:
+                        button.click(timeout=3000, force=True)
+                        try:
+                            about.first.wait_for(
+                                state="hidden",
+                                timeout=5000,
+                            )
+                        except Exception:
+                            pass
+                        return
+
+            # Fallback if Sonos changes the close button metadata.
+            self.page.keyboard.press("Escape")
+
+            try:
+                about.first.wait_for(
+                    state="hidden",
+                    timeout=5000,
+                )
+            except Exception:
+                pass
+
         except Exception:
             pass
 
     def _favorites(self):
+        # A previous command may have left the station detail overlay open.
+        self._close_station_detail_if_open()
+
         favorites = self.page.get_by_text(
             "Sonos Favorites",
             exact=True,
