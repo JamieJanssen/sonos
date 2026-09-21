@@ -120,7 +120,6 @@ def play_favorite(page, station_name):
                     f"Found Favorites container at ancestor level {level}"
                 )
                 break
-
         except Exception:
             pass
 
@@ -129,29 +128,44 @@ def play_favorite(page, station_name):
             f"Could not find Favorites container containing '{station_name}'"
         )
 
-    print("\n===== SELECTED FAVORITES SECTION =====\n")
-
-    try:
-        print(favorites_section.inner_text())
-    except Exception:
-        pass
-
-    station = favorites_section.get_by_text(
+    station_text = favorites_section.get_by_text(
         station_name,
         exact=True
     )
 
-    print(f"{station_name} matches inside Favorites:", station.count())
-
-    if station.count() == 0:
+    if station_text.count() == 0:
         raise RuntimeError(
             f"Favorite '{station_name}' not found inside Favorites"
         )
 
-    station.first.scroll_into_view_if_needed()
-    station.first.click()
+    station_text.first.scroll_into_view_if_needed()
 
-    print(f"Clicked favorite '{station_name}'")
+    # Click the actual clickable card/button containing the station,
+    # not only the inner text node.
+    station_card = station_text.first.locator(
+        "xpath=ancestor::*[self::button or @role='button'][1]"
+    )
+
+    if station_card.count() == 0:
+        station_card = station_text.first.locator(
+            "xpath=ancestor::*[.//button][1]"
+        )
+
+    if station_card.count() == 0:
+        raise RuntimeError(
+            f"Could not find clickable card for favorite '{station_name}'"
+        )
+
+    print(f"Selecting favorite '{station_name}'...")
+    station_card.first.click(timeout=5000, force=True)
+
+    print(f"Favorite '{station_name}' selected")
+
+    # Wait until the station detail view is actually present.
+    page.get_by_text(station_name, exact=True).last.wait_for(
+        state="visible",
+        timeout=10000
+    )
 
 
 def press_station_play(page, station_name):
