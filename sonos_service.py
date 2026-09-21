@@ -541,52 +541,38 @@ class SonosController:
 
             service_url = self.page.url
 
-            view_all_buttons = self.page.get_by_role(
+            favorites_heading = self.page.get_by_text(
+                "Favorites",
+                exact=True,
+            )
+
+            favorites_heading.first.wait_for(
+                state="visible",
+                timeout=10000,
+            )
+
+            favorites_section = favorites_heading.first.locator(
+                "xpath=ancestor::*[.//button[@aria-label='View All']][1]"
+            )
+
+            favorites_view_all = favorites_section.get_by_role(
                 "button",
                 name="View All",
             )
 
-            view_all_sections = []
+            favorites_view_all.first.wait_for(
+                state="visible",
+                timeout=5000,
+            )
 
-            for i in range(view_all_buttons.count()):
-                button = view_all_buttons.nth(i)
-
-                try:
-                    if not button.is_visible():
-                        continue
-
-                    context = button.evaluate(
-                        """(el) => {
-                            let node = el;
-
-                            for (let depth = 0; depth < 8 && node; depth++) {
-                                const text = (node.innerText || "").trim();
-
-                                if (text && text !== "View All") {
-                                    return text.slice(0, 1000);
-                                }
-
-                                node = node.parentElement;
-                            }
-
-                            return "";
-                        }"""
-                    )
-
-                    view_all_sections.append({
-                        "index": i,
-                        "context": context,
-                    })
-                except Exception:
-                    pass
-
-            if not view_all_sections:
-                raise RuntimeError(
-                    "No visible View All buttons found in Sonos Radio"
-                )
+            favorites_view_all.first.click(
+                timeout=5000,
+                force=True,
+            )
 
             self.page.wait_for_timeout(1500)
             favorites_url = self.page.url
+            view_all_sections = []
 
             visible_controls = []
 
