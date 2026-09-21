@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query
 from playwright.sync_api import sync_playwright
@@ -492,6 +493,29 @@ class SonosController:
                     "error": str(exc),
                 })
 
+        def find_named_resource(value, name):
+            if isinstance(value, dict):
+                if value.get("name") == name:
+                    resource_id = value.get("id")
+
+                    if isinstance(resource_id, dict):
+                        return value
+
+                for child in value.values():
+                    found = find_named_resource(child, name)
+
+                    if found:
+                        return found
+
+            elif isinstance(value, list):
+                for child in value:
+                    found = find_named_resource(child, name)
+
+                    if found:
+                        return found
+
+            return None
+
         self.page.on("request", capture_request)
         self.page.on("response", capture_response)
 
@@ -556,39 +580,128 @@ class SonosController:
                     "Visible Favorites entry not found in Sonos Radio"
                 )
 
-            self.page.get_by_text(
-                "SLAM!",
-                exact=True,
-            ).first.wait_for(
-                state="visible",
-                timeout=15000,
-            )
-
+            self.page.wait_for_timeout(1500)
             favorites_url = self.page.url
 
-            # Keep only useful network calls and remove duplicates.
-            seen = set()
-            useful = []
+            sonos_radio_responses = [
+                item
+                for item in responses
+                if (
+                    "/services/77575/accounts/1/" in item["url"]
+                    and item.get("body") is not None
+                )
+            ]
 
-            for item in requests:
-                key = (
-                    item["type"],
-                    item["method"],
-                    item["url"],
+            favorites_resource = None
+
+            for item in sonos_radio_responses:
+                favorites_resource = find_named_resource(
+                    item.get("body"),
+                    "Favorites",
                 )
 
-                if key in seen:
-                    continue
+                if favorites_resource:
+                    break
 
-                seen.add(key)
-                useful.append(item)
+            favorites_container = None
+            stations = []
+
+            if favorites_resource:
+                resource_id = favorites_resource.get("id", {})
+                object_id = resource_id.get("objectId")
+
+                if object_id:
+                    encoded_object_id = quote(
+                        object_id,
+                        safe="",
+                    )
+
+                    favorites_container_url = (
+                        "https://play.sonos.com/api/content/v1/"
+                        f"households/{self.household_id}/"
+                        "services/77575/accounts/1/"
+                        "catalog/containers/"
+                        f"{encoded_object_id}/resources?count=100"
+                    )
+
+                    favorites_container = self.page.evaluate(
+                        """async (url) => {
+                            const response = await fetch(url);
+
+                            if (!response.ok) {
+                                throw new Error(
+                                    "Favorites request failed: " + response.status
+                                );
+                            }
+
+                            return await response.json();
+                        }""",
+                        favorites_container_url,
+                    )
+
+                    resources = []
+
+                    if isinstance(favorites_container, dict):
+                        resources.extend(
+                            favorites_container.get(
+                                "resources",
+                                [],
+                            )
+                        )
+
+                        for section in favorites_container.values():
+                            if isinstance(section, dict):
+                                resources.extend(
+                                    section.get(
+                                        "resources",
+                                        [],
+                                    )
+                                )
+
+                    seen = set()
+
+                    for resource in resources:
+                        if not isinstance(resource, dict):
+                            continue
+
+                        if isinstance(resource.get("resource"), dict):
+                            resource = resource["resource"]
+
+                        if not resource.get("playable"):
+                            continue
+
+                        station_id = resource.get("id", {})
+
+                        if not isinstance(station_id, dict):
+                            continue
+
+                        item = {
+                            "name": resource.get("name"),
+                            "serviceId": station_id.get("serviceId"),
+                            "accountId": station_id.get("accountId"),
+                            "objectId": station_id.get("objectId"),
+                            "type": resource.get("type"),
+                        }
+
+                        key = (
+                            item["serviceId"],
+                            item["accountId"],
+                            item["objectId"],
+                        )
+
+                        if key in seen:
+                            continue
+
+                        seen.add(key)
+                        stations.append(item)
 
             return {
                 "ok": True,
                 "service_url": service_url,
                 "favorites_url": favorites_url,
-                "requests": useful[-100:],
-                "responses": responses[-100:],
+                "favorites_resource": favorites_resource,
+                "stations": stations,
+                "sonos_radio_responses": sonos_radio_responses,
             }
 
         finally:
@@ -600,7 +713,6 @@ class SonosController:
                 "response",
                 capture_response,
             )
-
     def _wait_for_station_playing(
         self,
         group_id,
