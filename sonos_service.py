@@ -612,108 +612,95 @@ class SonosController:
                 )
             ]
 
-            favorites_resource = None
+            favorites_resource = {
+                "name": "Favorites",
+                "id": {
+                    "serviceId": "77575",
+                    "accountId": "1",
+                    "objectId": "/stations/SONOS_FAVORITES",
+                },
+            }
 
-            for item in sonos_radio_responses:
-                favorites_resource = find_named_resource(
-                    item.get("body"),
-                    "Favorites",
+            favorites_container_url = (
+                "https://play.sonos.com/api/content/v1/"
+                f"households/{self.household_id}/"
+                "services/77575/accounts/1/"
+                "catalog/containers/"
+                f"{quote('/stations/SONOS_FAVORITES', safe='')}/"
+                "resources?count=100"
+            )
+
+            favorites_container = self.page.evaluate(
+                """async (url) => {
+                    const response = await fetch(url);
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "Favorites request failed: " + response.status
+                        );
+                    }
+
+                    return await response.json();
+                }""",
+                favorites_container_url,
+            )
+
+            resources = []
+
+            if isinstance(favorites_container, dict):
+                resources.extend(
+                    favorites_container.get(
+                        "resources",
+                        [],
+                    )
                 )
 
-                if favorites_resource:
-                    break
-
-            favorites_container = None
-            stations = []
-
-            if favorites_resource:
-                resource_id = favorites_resource.get("id", {})
-                object_id = resource_id.get("objectId")
-
-                if object_id:
-                    encoded_object_id = quote(
-                        object_id,
-                        safe="",
-                    )
-
-                    favorites_container_url = (
-                        "https://play.sonos.com/api/content/v1/"
-                        f"households/{self.household_id}/"
-                        "services/77575/accounts/1/"
-                        "catalog/containers/"
-                        f"{encoded_object_id}/resources?count=100"
-                    )
-
-                    favorites_container = self.page.evaluate(
-                        """async (url) => {
-                            const response = await fetch(url);
-
-                            if (!response.ok) {
-                                throw new Error(
-                                    "Favorites request failed: " + response.status
-                                );
-                            }
-
-                            return await response.json();
-                        }""",
-                        favorites_container_url,
-                    )
-
-                    resources = []
-
-                    if isinstance(favorites_container, dict):
+                for section in favorites_container.values():
+                    if isinstance(section, dict):
                         resources.extend(
-                            favorites_container.get(
+                            section.get(
                                 "resources",
                                 [],
                             )
                         )
 
-                        for section in favorites_container.values():
-                            if isinstance(section, dict):
-                                resources.extend(
-                                    section.get(
-                                        "resources",
-                                        [],
-                                    )
-                                )
+            stations = []
+            seen = set()
 
-                    seen = set()
+            for resource in resources:
+                if not isinstance(resource, dict):
+                    continue
 
-                    for resource in resources:
-                        if not isinstance(resource, dict):
-                            continue
+                if isinstance(resource.get("resource"), dict):
+                    resource = resource["resource"]
 
-                        if isinstance(resource.get("resource"), dict):
-                            resource = resource["resource"]
+                if not resource.get("playable"):
+                    continue
 
-                        if not resource.get("playable"):
-                            continue
+                station_id = resource.get("id", {})
 
-                        station_id = resource.get("id", {})
+                if not isinstance(station_id, dict):
+                    continue
 
-                        if not isinstance(station_id, dict):
-                            continue
+                item = {
+                    "name": resource.get("name"),
+                    "serviceId": station_id.get("serviceId"),
+                    "accountId": station_id.get("accountId"),
+                    "objectId": station_id.get("objectId"),
+                    "type": resource.get("type"),
+                }
 
-                        item = {
-                            "name": resource.get("name"),
-                            "serviceId": station_id.get("serviceId"),
-                            "accountId": station_id.get("accountId"),
-                            "objectId": station_id.get("objectId"),
-                            "type": resource.get("type"),
-                        }
+                key = (
+                    item["serviceId"],
+                    item["accountId"],
+                    item["objectId"],
+                )
 
-                        key = (
-                            item["serviceId"],
-                            item["accountId"],
-                            item["objectId"],
-                        )
+                if key in seen:
+                    continue
 
-                        if key in seen:
-                            continue
-
-                        seen.add(key)
-                        stations.append(item)
+                seen.add(key)
+                stations.append(item)
 
             return {
                 "ok": True,
