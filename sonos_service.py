@@ -135,6 +135,8 @@ class SonosController:
                                 job.room,
                                 job.station,
                             )
+                        elif job.action == "stop":
+                            job.result = self._stop(job.room)
                         elif job.action == "rooms":
                             self._refresh_groups()
                             job.result = {
@@ -508,6 +510,59 @@ class SonosController:
         except Exception:
             return False
 
+    def _stop(self, room_name):
+        if room_name not in self.groups:
+            self._refresh_groups()
+
+        if room_name not in self.groups:
+            raise RuntimeError(
+                f"Unknown room '{room_name}'. "
+                f"Available: {', '.join(sorted(self.groups))}"
+            )
+
+        group_id = self.groups[room_name]["id"]
+
+        try:
+            self._ws_request(
+                namespace="playback",
+                command="pause",
+                target={
+                    "groupId": group_id,
+                },
+                body={},
+            )
+        except Exception as first_error:
+            print(
+                f"Stop failed on '{room_name}', retrying once: "
+                f"{first_error}"
+            )
+
+            self._refresh_groups()
+
+            if room_name not in self.groups:
+                raise
+
+            group_id = self.groups[room_name]["id"]
+
+            self._ws_request(
+                namespace="playback",
+                command="pause",
+                target={
+                    "groupId": group_id,
+                },
+                body={},
+            )
+
+        print(
+            f"Stopped '{room_name}' ({group_id})"
+        )
+
+        return {
+            "ok": True,
+            "room": room_name,
+            "groupId": group_id,
+        }
+
     def _play(self, room_name, station_name):
         if station_name not in self.favorites:
             self._refresh_favorites()
@@ -636,6 +691,20 @@ def sonos_play(
         room=room,
         station=station,
     )
+
+
+@app.get("/sonos/stop")
+def sonos_stop(
+    room: str = Query(...),
+    token: str = Query(""),
+):
+    _check_token(token)
+
+    return _run_controller(
+        "stop",
+        room=room,
+    )
+
 
 
 @app.get("/sonos/rooms")
