@@ -544,8 +544,16 @@ class SonosController:
                     "type": "STREAM",
                     "id": {
                         "objectId": station["objectId"],
-                        "accountId": station["accountId"],
-                        "serviceId": station["serviceId"],
+                        "accountId": (
+                            "sn_1"
+                            if str(station.get("objectId", "")).startswith("tunein:")
+                            else station["accountId"]
+                        ),
+                        "serviceId": (
+                            "303"
+                            if str(station.get("objectId", "")).startswith("tunein:")
+                            else station["serviceId"]
+                        ),
                     },
                     "playbackAction": "PLAY",
                     "playModes": {
