@@ -583,6 +583,35 @@ class SonosController:
             self.page.wait_for_timeout(1500)
             favorites_url = self.page.url
 
+            visible_controls = []
+
+            controls = self.page.locator(
+                "button, a, [role='button']"
+            )
+
+            for i in range(min(controls.count(), 200)):
+                candidate = controls.nth(i)
+
+                try:
+                    if not candidate.is_visible():
+                        continue
+
+                    visible_controls.append({
+                        "text": (
+                            candidate.inner_text() or ""
+                        ).strip()[:300],
+                        "aria": (
+                            candidate.get_attribute("aria-label")
+                            or ""
+                        ),
+                        "title": (
+                            candidate.get_attribute("title")
+                            or ""
+                        ),
+                    })
+                except Exception:
+                    pass
+
             sonos_radio_responses = [
                 item
                 for item in responses
@@ -701,6 +730,7 @@ class SonosController:
                 "favorites_url": favorites_url,
                 "favorites_resource": favorites_resource,
                 "stations": stations,
+                "visible_controls": visible_controls,
                 "sonos_radio_responses": sonos_radio_responses,
             }
 
