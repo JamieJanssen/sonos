@@ -1,9 +1,6 @@
-import os
 import sys
 from playwright.sync_api import sync_playwright
-
-SONOS_EMAIL = os.environ.get("SONOS_EMAIL", "jamie@itsjamie.com")
-SONOS_PASSWORD = os.environ.get("SONOS_PASSWORD", "")
+from credentials import SONOS_EMAIL, SONOS_PASSWORD
 
 ROOM = sys.argv[1] if len(sys.argv) > 1 else "Keuken"
 STATION = sys.argv[2] if len(sys.argv) > 2 else "Radio 10"
@@ -219,10 +216,6 @@ def press_play_for_room(page, room_name):
     )
 
 
-if not SONOS_PASSWORD:
-    raise RuntimeError(
-        "Set SONOS_PASSWORD in the environment before running this script."
-    )
 
 
 with sync_playwright() as p:
