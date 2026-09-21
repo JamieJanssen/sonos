@@ -541,44 +541,20 @@ class SonosController:
 
             service_url = self.page.url
 
-            favorites = self.page.get_by_text(
-                "Favorites",
-                exact=False,
+            view_all = self.page.get_by_role(
+                "button",
+                name="View All",
+            ).first
+
+            view_all.wait_for(
+                state="visible",
+                timeout=10000,
             )
 
-            clicked = False
-
-            for i in range(favorites.count()):
-                candidate = favorites.nth(i)
-
-                try:
-                    if not candidate.is_visible():
-                        continue
-
-                    clickable = candidate.locator(
-                        "xpath=ancestor::*[self::button or @role='button' or self::a][1]"
-                    )
-
-                    if clickable.count() > 0:
-                        clickable.first.click(
-                            timeout=5000,
-                            force=True,
-                        )
-                    else:
-                        candidate.click(
-                            timeout=5000,
-                            force=True,
-                        )
-
-                    clicked = True
-                    break
-                except Exception:
-                    pass
-
-            if not clicked:
-                raise RuntimeError(
-                    "Visible Favorites entry not found in Sonos Radio"
-                )
+            view_all.click(
+                timeout=5000,
+                force=True,
+            )
 
             self.page.wait_for_timeout(1500)
             favorites_url = self.page.url
