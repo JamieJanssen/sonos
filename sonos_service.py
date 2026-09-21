@@ -1,10 +1,8 @@
 import queue
 import threading
 import uuid
-from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query
 from playwright.sync_api import sync_playwright
@@ -18,21 +16,6 @@ SONOS_API_TOKEN = getattr(credentials, "SONOS_API_TOKEN", "")
 
 PROFILE_DIR = "/home/jamie/sonos/profile"
 WEB_APP_URL = "https://play.sonos.com/en-us/web-app"
-WS_LOG = "/home/jamie/sonos/websocket.log"
-
-STATIONS = {
-    "Qmusic": {
-        "serviceId": "303",
-        "objectId": "tunein:19004",
-        "accountId": "sn_1",
-    },
-    "Radio 10": {
-        "serviceId": "303",
-        "objectId": "tunein:7073",
-        "accountId": "sn_1",
-    },
-}
-
 WEBSOCKET_HOOK = r"""
 (() => {
     const NativeWebSocket = window.WebSocket;
@@ -89,19 +72,6 @@ WEBSOCKET_HOOK = r"""
 app = FastAPI(title="Sonos Controller")
 
 
-def _log_ws(direction, url, payload):
-    if isinstance(payload, bytes):
-        payload = payload.hex()
-
-    line = (
-        f"{datetime.now().isoformat(timespec='milliseconds')} "
-        f"{direction} {url} {payload}"
-    )
-
-    with open(WS_LOG, "a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-
-
 @dataclass
 class Job:
     action: str
@@ -122,6 +92,7 @@ class SonosController:
         self.startup_error = None
         self.household_id = None
         self.groups = {}
+        self.favorites = {}
 
         self.thread = threading.Thread(
             target=self._worker,
@@ -146,12 +117,11 @@ class SonosController:
                     else self.context.new_page()
                 )
 
-                self.page.on("websocket", self._on_websocket)
-
                 self._ensure_web_app()
                 self._wait_for_websocket()
                 self._refresh_household()
                 self._refresh_groups()
+                self._refresh_favorites()
 
                 print("Sonos service ready")
                 self.ready.set()
@@ -171,8 +141,12 @@ class SonosController:
                                 "ok": True,
                                 "rooms": sorted(self.groups),
                             }
-                        elif job.action == "debug_favorites":
-                            job.result = self._debug_favorites()
+                        elif job.action == "favorites":
+                            self._refresh_favorites()
+                            job.result = {
+                                "ok": True,
+                                "stations": list(self.favorites.values()),
+                            }
                         else:
                             raise RuntimeError(
                                 f"Unsupported action: {job.action}"
@@ -220,25 +194,6 @@ class SonosController:
             raise job.error
 
         return job.result
-
-    def _on_websocket(self, websocket):
-        websocket.on(
-            "framesent",
-            lambda payload: _log_ws(
-                ">>",
-                websocket.url,
-                payload,
-            ),
-        )
-
-        websocket.on(
-            "framereceived",
-            lambda payload: _log_ws(
-                "<<",
-                websocket.url,
-                payload,
-            ),
-        )
 
     def _ensure_web_app(self):
         print("Opening Sonos Web App...")
@@ -448,280 +403,78 @@ class SonosController:
 
         return self.groups
 
-    def _debug_favorites(self):
-        requests = []
-        responses = []
+    def _refresh_favorites(self):
+        if not self.household_id:
+            self._refresh_household()
 
-        def capture_request(request):
-            if request.resource_type in {
-                "document",
-                "xhr",
-                "fetch",
-            }:
-                requests.append({
-                    "type": request.resource_type,
-                    "method": request.method,
-                    "url": request.url,
-                })
+        favorites_url = (
+            "https://play.sonos.com/api/content/v1/"
+            f"households/{self.household_id}/"
+            "services/77575/accounts/1/"
+            "catalog/containers/%2Fstations%2FSONOS_FAVORITES/"
+            "resources?count=100"
+        )
 
-        def capture_response(response):
-            url = response.url
+        data = self.page.evaluate(
+            """async (url) => {
+                const response = await fetch(url);
 
-            if "/api/content/v1/" not in url:
-                return
-
-            try:
-                content_type = (
-                    response.headers.get("content-type", "")
-                    or ""
-                ).lower()
-
-                body = None
-
-                if "application/json" in content_type:
-                    body = response.json()
-
-                responses.append({
-                    "status": response.status,
-                    "url": url,
-                    "body": body,
-                })
-            except Exception as exc:
-                responses.append({
-                    "status": response.status,
-                    "url": url,
-                    "error": str(exc),
-                })
-
-        def find_named_resource(value, name):
-            if isinstance(value, dict):
-                if value.get("name") == name:
-                    resource_id = value.get("id")
-
-                    if isinstance(resource_id, dict):
-                        return value
-
-                for child in value.values():
-                    found = find_named_resource(child, name)
-
-                    if found:
-                        return found
-
-            elif isinstance(value, list):
-                for child in value:
-                    found = find_named_resource(child, name)
-
-                    if found:
-                        return found
-
-            return None
-
-        self.page.on("request", capture_request)
-        self.page.on("response", capture_response)
-
-        try:
-            self.page.goto(
-                WEB_APP_URL,
-                wait_until="domcontentloaded",
-            )
-
-            sonos_radio = self.page.locator(
-                'button[aria-label="Sonos Radio"]'
-            )
-
-            sonos_radio.first.wait_for(
-                state="visible",
-                timeout=15000,
-            )
-
-            sonos_radio.first.click(
-                timeout=5000,
-                force=True,
-            )
-
-            service_url = self.page.url
-
-            favorites_heading = self.page.get_by_text(
-                "Favorites",
-                exact=True,
-            )
-
-            favorites_heading.first.wait_for(
-                state="visible",
-                timeout=10000,
-            )
-
-            favorites_section = favorites_heading.first.locator(
-                "xpath=ancestor::*[.//button[@aria-label='View All']][1]"
-            )
-
-            favorites_view_all = favorites_section.get_by_role(
-                "button",
-                name="View All",
-            )
-
-            favorites_view_all.first.wait_for(
-                state="visible",
-                timeout=5000,
-            )
-
-            favorites_view_all.first.click(
-                timeout=5000,
-                force=True,
-            )
-
-            self.page.wait_for_timeout(1500)
-            favorites_url = self.page.url
-            view_all_sections = []
-
-            visible_controls = []
-
-            controls = self.page.locator(
-                "button, a, [role='button']"
-            )
-
-            for i in range(min(controls.count(), 200)):
-                candidate = controls.nth(i)
-
-                try:
-                    if not candidate.is_visible():
-                        continue
-
-                    visible_controls.append({
-                        "text": (
-                            candidate.inner_text() or ""
-                        ).strip()[:300],
-                        "aria": (
-                            candidate.get_attribute("aria-label")
-                            or ""
-                        ),
-                        "title": (
-                            candidate.get_attribute("title")
-                            or ""
-                        ),
-                    })
-                except Exception:
-                    pass
-
-            sonos_radio_responses = [
-                item
-                for item in responses
-                if (
-                    "/services/77575/accounts/1/" in item["url"]
-                    and item.get("body") is not None
-                )
-            ]
-
-            favorites_resource = {
-                "name": "Favorites",
-                "id": {
-                    "serviceId": "77575",
-                    "accountId": "1",
-                    "objectId": "/stations/SONOS_FAVORITES",
-                },
-            }
-
-            favorites_container_url = (
-                "https://play.sonos.com/api/content/v1/"
-                f"households/{self.household_id}/"
-                "services/77575/accounts/1/"
-                "catalog/containers/"
-                f"{quote('/stations/SONOS_FAVORITES', safe='')}/"
-                "resources?count=100"
-            )
-
-            favorites_container = self.page.evaluate(
-                """async (url) => {
-                    const response = await fetch(url);
-
-                    if (!response.ok) {
-                        throw new Error(
-                            "Favorites request failed: " + response.status
-                        );
-                    }
-
-                    return await response.json();
-                }""",
-                favorites_container_url,
-            )
-
-            resources = []
-
-            if isinstance(favorites_container, dict):
-                resources.extend(
-                    favorites_container.get(
-                        "resources",
-                        [],
-                    )
-                )
-
-                for section in favorites_container.values():
-                    if isinstance(section, dict):
-                        resources.extend(
-                            section.get(
-                                "resources",
-                                [],
-                            )
-                        )
-
-            stations = []
-            seen = set()
-
-            for resource in resources:
-                if not isinstance(resource, dict):
-                    continue
-
-                if isinstance(resource.get("resource"), dict):
-                    resource = resource["resource"]
-
-                if not resource.get("playable"):
-                    continue
-
-                station_id = resource.get("id", {})
-
-                if not isinstance(station_id, dict):
-                    continue
-
-                item = {
-                    "name": resource.get("name"),
-                    "serviceId": station_id.get("serviceId"),
-                    "accountId": station_id.get("accountId"),
-                    "objectId": station_id.get("objectId"),
-                    "type": resource.get("type"),
+                if (!response.ok) {
+                    throw new Error(
+                        "Favorites request failed: " + response.status
+                    );
                 }
 
-                key = (
-                    item["serviceId"],
-                    item["accountId"],
-                    item["objectId"],
-                )
+                return await response.json();
+            }""",
+            favorites_url,
+        )
 
-                if key in seen:
-                    continue
+        resources = []
 
-                seen.add(key)
-                stations.append(item)
+        if isinstance(data, dict):
+            resources.extend(data.get("resources", []))
 
-            return {
-                "ok": True,
-                "service_url": service_url,
-                "favorites_url": favorites_url,
-                "favorites_resource": favorites_resource,
-                "stations": stations,
-                "view_all_sections": view_all_sections,
-                "visible_controls": visible_controls,
-                "sonos_radio_responses": sonos_radio_responses,
+            for section in data.values():
+                if isinstance(section, dict):
+                    resources.extend(section.get("resources", []))
+
+        favorites = {}
+
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+
+            if isinstance(resource.get("resource"), dict):
+                resource = resource["resource"]
+
+            if not resource.get("playable"):
+                continue
+
+            station_id = resource.get("id", {})
+
+            if not isinstance(station_id, dict):
+                continue
+
+            name = resource.get("name")
+
+            if not name:
+                continue
+
+            favorites[name] = {
+                "name": name,
+                "serviceId": station_id.get("serviceId"),
+                "accountId": station_id.get("accountId"),
+                "objectId": station_id.get("objectId"),
+                "type": resource.get("type"),
             }
 
-        finally:
-            self.page.remove_listener(
-                "request",
-                capture_request,
-            )
-            self.page.remove_listener(
-                "response",
-                capture_response,
-            )
+        if not favorites:
+            raise RuntimeError("No Sonos Radio favorites found")
+
+        self.favorites = favorites
+        return self.favorites
+
     def _wait_for_station_playing(
         self,
         group_id,
@@ -760,10 +513,13 @@ class SonosController:
             return False
 
     def _play(self, room_name, station_name):
-        if station_name not in STATIONS:
+        if station_name not in self.favorites:
+            self._refresh_favorites()
+
+        if station_name not in self.favorites:
             raise RuntimeError(
                 f"Unknown station '{station_name}'. "
-                f"Available: {', '.join(STATIONS)}"
+                f"Available: {', '.join(sorted(self.favorites))}"
             )
 
         if room_name not in self.groups:
@@ -775,7 +531,7 @@ class SonosController:
                 f"Available: {', '.join(sorted(self.groups))}"
             )
 
-        station = STATIONS[station_name]
+        station = self.favorites[station_name]
 
         def load_content(group_id):
             return self._ws_request(
@@ -904,12 +660,12 @@ def sonos_rooms(
     return _run_controller("rooms")
 
 
-@app.get("/sonos/debug/favorites")
-def sonos_debug_favorites(
+@app.get("/sonos/favorites")
+def sonos_favorites(
     token: str = Query(""),
 ):
     _check_token(token)
-    return _run_controller("debug_favorites")
+    return _run_controller("favorites")
 
 
 @app.get("/sonos/status")
@@ -934,7 +690,7 @@ def sonos_status(
     return {
         "ok": True,
         "status": "ready",
-        "stations": sorted(STATIONS),
+        "stations": sorted(controller.favorites),
     }
 
 
