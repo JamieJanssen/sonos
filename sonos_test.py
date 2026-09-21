@@ -152,36 +152,72 @@ def play_favorite(page, station_name):
 
 
 def press_station_play(page, station_name):
-    print(f"\nLooking for Play button on '{station_name}'...")
+    print(f"\nLooking for station controls on '{station_name}'...")
 
-    play_button = page.get_by_role(
-        "button",
-        name="Play",
-        exact=True
-    )
+    title = page.get_by_text(station_name, exact=True)
 
     try:
-        play_button.first.wait_for(
+        title.first.wait_for(
             state="visible",
             timeout=10000
         )
     except Exception:
-        # Fallback to an aria-label based selector in case Sonos changes roles.
-        play_button = page.locator(
-            'button[aria-label="Play"]'
+        raise RuntimeError(
+            f"Station detail page for '{station_name}' not found"
+        )
+
+    detail = None
+
+    for level in range(1, 8):
+        candidate = title.first.locator(
+            f"xpath=ancestor::*[{level}]"
         )
 
         try:
-            play_button.first.wait_for(
-                state="visible",
-                timeout=5000
-            )
-        except Exception:
-            raise RuntimeError(
-                f"Play button not found on station '{station_name}'"
-            )
+            buttons = candidate.locator("button")
 
-    play_button.first.click(timeout=5000)
+            if buttons.count() >= 2:
+                detail = candidate
+                break
+        except Exception:
+            pass
+
+    if detail is None:
+        raise RuntimeError(
+            f"Could not find station controls for '{station_name}'"
+        )
+
+    buttons = detail.locator("button")
+
+    print("Station buttons found:", buttons.count())
+
+    for i in range(buttons.count()):
+        button = buttons.nth(i)
+
+        try:
+            text = button.inner_text()
+        except Exception:
+            text = ""
+
+        aria = button.get_attribute("aria-label")
+        title_attr = button.get_attribute("title")
+
+        print(
+            f"Station button {i}: "
+            f"text={text!r}, "
+            f"aria-label={aria!r}, "
+            f"title={title_attr!r}"
+        )
+
+    # On the Sonos station detail page the first control is Play
+    # and the second control is the overflow ("...") menu.
+    play_button = buttons.first
+
+    play_button.click(
+        timeout=5000,
+        force=True
+    )
+
     print(f"Play clicked for '{station_name}'")
 
 
