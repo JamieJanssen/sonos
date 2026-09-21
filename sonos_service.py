@@ -615,25 +615,35 @@ class SonosController:
             )
 
         group_id = self.groups[room_name]["id"]
+        last_error = None
 
-        try:
-            load_content(group_id)
+        for attempt in range(1, 4):
+            try:
+                load_content(group_id)
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
 
-        except Exception as first_error:
-            # A Sonos load can occasionally fail transiently. Refresh the
-            # current group id and retry once.
-            print(
-                f"Play failed for '{station_name}' on '{room_name}', "
-                f"retrying once: {first_error}"
-            )
+                if attempt >= 3:
+                    raise
 
-            self._refresh_groups()
+                print(
+                    f"Play failed for '{station_name}' on '{room_name}' "
+                    f"(attempt {attempt}/3), retrying: {exc}"
+                )
 
-            if room_name not in self.groups:
-                raise
+                self.page.wait_for_timeout(500)
+                self._refresh_groups()
 
-            group_id = self.groups[room_name]["id"]
-            load_content(group_id)
+                if room_name not in self.groups:
+                    raise
+
+                group_id = self.groups[room_name]["id"]
+                self.page.wait_for_timeout(500)
+
+        if last_error is not None:
+            raise last_error
 
         print(
             f"Playing '{station_name}' on "
