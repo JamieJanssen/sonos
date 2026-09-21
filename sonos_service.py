@@ -470,37 +470,87 @@ class SonosController:
                 wait_until="domcontentloaded",
             )
 
+            # The service tile text is split across nested elements in the
+            # current Sonos UI, so an exact text locator is too strict.
             sonos_radio = self.page.get_by_text(
                 "Sonos Radio",
-                exact=True,
+                exact=False,
             )
 
-            sonos_radio.last.wait_for(
-                state="visible",
-                timeout=15000,
-            )
+            clicked = False
 
-            sonos_radio.last.click(
-                timeout=5000,
-                force=True,
-            )
+            for i in range(sonos_radio.count()):
+                candidate = sonos_radio.nth(i)
+
+                try:
+                    if not candidate.is_visible():
+                        continue
+
+                    clickable = candidate.locator(
+                        "xpath=ancestor::*[self::button or @role='button' or self::a][1]"
+                    )
+
+                    if clickable.count() > 0:
+                        clickable.first.click(
+                            timeout=5000,
+                            force=True,
+                        )
+                    else:
+                        candidate.click(
+                            timeout=5000,
+                            force=True,
+                        )
+
+                    clicked = True
+                    break
+                except Exception:
+                    pass
+
+            if not clicked:
+                raise RuntimeError(
+                    "Visible Sonos Radio service tile not found"
+                )
 
             service_url = self.page.url
 
             favorites = self.page.get_by_text(
                 "Favorites",
-                exact=True,
+                exact=False,
             )
 
-            favorites.first.wait_for(
-                state="visible",
-                timeout=15000,
-            )
+            clicked = False
 
-            favorites.first.click(
-                timeout=5000,
-                force=True,
-            )
+            for i in range(favorites.count()):
+                candidate = favorites.nth(i)
+
+                try:
+                    if not candidate.is_visible():
+                        continue
+
+                    clickable = candidate.locator(
+                        "xpath=ancestor::*[self::button or @role='button' or self::a][1]"
+                    )
+
+                    if clickable.count() > 0:
+                        clickable.first.click(
+                            timeout=5000,
+                            force=True,
+                        )
+                    else:
+                        candidate.click(
+                            timeout=5000,
+                            force=True,
+                        )
+
+                    clicked = True
+                    break
+                except Exception:
+                    pass
+
+            if not clicked:
+                raise RuntimeError(
+                    "Visible Favorites entry not found in Sonos Radio"
+                )
 
             self.page.get_by_text(
                 "SLAM!",
