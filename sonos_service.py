@@ -429,9 +429,14 @@ class SonosController:
 
         try:
             load_content(group_id)
-        except Exception:
-            # The cached group id can become stale after grouping or
-            # ungrouping speakers. Refresh once and retry automatically.
+        except Exception as first_error:
+            # A Sonos load can occasionally fail transiently ("Something went
+            # wrong"). Refresh the current group id and retry once.
+            print(
+                f"Play failed for '{station_name}' on '{room_name}', "
+                f"retrying once: {first_error}"
+            )
+
             self._refresh_groups()
 
             if room_name not in self.groups:
