@@ -219,53 +219,81 @@ def press_play_for_room(page, room_name):
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page()
-
-    print("Opening Sonos login...")
-
-    page.goto(
-        "https://login.sonos.com/",
-        wait_until="domcontentloaded"
+    context = p.chromium.launch_persistent_context(
+        user_data_dir="/home/jamie/sonos/profile",
+        headless=True
     )
 
-    print("Page title:", page.title())
-    print("URL:", page.url)
-
-    page.get_by_label("Email").fill(SONOS_EMAIL)
-    page.get_by_label("Password").fill(SONOS_PASSWORD)
-
-    page.get_by_role(
-        "button",
-        name="Sign in"
-    ).click()
-
-    page.wait_for_timeout(5000)
-
-    print("After login URL:", page.url)
-    print("After login title:", page.title())
-
-    if "idassets.sonos.com/welcome" in page.url:
-        print("Clicking Continue...")
-
-        page.get_by_role(
-            "button",
-            name="Continue"
-        ).click()
-
-        page.wait_for_timeout(3000)
+    page = context.pages[0] if context.pages else context.new_page()
 
     print("Opening Sonos Web App...")
 
     page.goto(
-        "https://play.sonos.com/",
+        "https://play.sonos.com/en-us/web-app",
         wait_until="domcontentloaded"
     )
+
+    room = page.get_by_text(ROOM, exact=True)
+
+    try:
+        room.first.wait_for(
+            state="visible",
+            timeout=10000
+        )
+        print("Existing Sonos session is valid")
+
+    except Exception:
+        print("Session expired or not available, logging in...")
+
+        page.goto(
+            "https://login.sonos.com/",
+            wait_until="domcontentloaded"
+        )
+
+        page.get_by_label("Email").fill(SONOS_EMAIL)
+        page.get_by_label("Password").fill(SONOS_PASSWORD)
+
+        page.get_by_role(
+            "button",
+            name="Sign in"
+        ).click()
+
+        page.wait_for_timeout(5000)
+
+        if "idassets.sonos.com/welcome" in page.url:
+            print("Clicking Continue...")
+            page.get_by_role(
+                "button",
+                name="Continue"
+            ).click()
+            page.wait_for_timeout(2000)
+
+        page.goto(
+            "https://play.sonos.com/en-us/web-app",
+            wait_until="domcontentloaded"
+        )
+
+        room = page.get_by_text(ROOM, exact=True)
+        room.first.wait_for(
+            state="visible",
+            timeout=30000
+        )
+
+        print("Logged in successfully")
 
     print("Web App URL:", page.url)
     print("Web App title:", page.title())
 
     select_room(page, ROOM)
+
+    print("\nScrolling down to load Favorites...")
+
+    for _ in range(8):
+        page.mouse.wheel(0, 1000)
+        page.wait_for_timeout(300)
+
+    page.wait_for_timeout(1000)
+
     inspect_favorites(page)
     play_favorite(page, STATION)
     press_play_for_room(page, ROOM)
@@ -291,7 +319,7 @@ with sync_playwright() as p:
     except Exception as e:
         print("Could not read body text:", e)
 
-    browser.close()
+    context.close()
 
 
 print("\nDone")
