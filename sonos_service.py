@@ -449,6 +449,7 @@ class SonosController:
 
     def _debug_favorites(self):
         requests = []
+        responses = []
 
         def capture_request(request):
             if request.resource_type in {
@@ -462,7 +463,37 @@ class SonosController:
                     "url": request.url,
                 })
 
+        def capture_response(response):
+            url = response.url
+
+            if "/api/content/v1/" not in url:
+                return
+
+            try:
+                content_type = (
+                    response.headers.get("content-type", "")
+                    or ""
+                ).lower()
+
+                body = None
+
+                if "application/json" in content_type:
+                    body = response.json()
+
+                responses.append({
+                    "status": response.status,
+                    "url": url,
+                    "body": body,
+                })
+            except Exception as exc:
+                responses.append({
+                    "status": response.status,
+                    "url": url,
+                    "error": str(exc),
+                })
+
         self.page.on("request", capture_request)
+        self.page.on("response", capture_response)
 
         try:
             self.page.goto(
@@ -557,12 +588,17 @@ class SonosController:
                 "service_url": service_url,
                 "favorites_url": favorites_url,
                 "requests": useful[-100:],
+                "responses": responses[-100:],
             }
 
         finally:
             self.page.remove_listener(
                 "request",
                 capture_request,
+            )
+            self.page.remove_listener(
+                "response",
+                capture_response,
             )
 
     def _wait_for_station_playing(
