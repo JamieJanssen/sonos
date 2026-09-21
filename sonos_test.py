@@ -24,12 +24,6 @@ def select_room(page, room_name):
         )
     except Exception:
         print(f"\nERROR: Room '{room_name}' did not appear.")
-        print("\n===== CURRENT BODY TEXT =====\n")
-
-        try:
-            print(page.locator("body").inner_text())
-        except Exception as e:
-            print("Could not read body:", e)
 
         page.screenshot(
             path="/home/jamie/sonos-room-not-found.png",
@@ -39,38 +33,30 @@ def select_room(page, room_name):
         raise RuntimeError(f"Room '{room_name}' not found")
 
     print(f"Room '{room_name}' found.")
-    print("Matches:", room.count())
+    print(f"Selecting '{room_name}'...")
 
-    room_card = room.first.locator(
-        "xpath=ancestor::*[.//button][1]"
+    active_button = page.locator(
+        f'button[aria-label="Set {room_name} as active"]'
     )
-
-    print("\n===== ROOM CARD =====\n")
 
     try:
-        print(room_card.inner_text())
-    except Exception as e:
-        print("Could not read room card:", e)
-
-    active_button = page.get_by_role(
-        "button",
-        name=f"Set {room_name} as active"
-    )
-
-    print("Active room buttons found:", active_button.count())
-
-    if active_button.count() == 0:
+        active_button.first.wait_for(
+            state="visible",
+            timeout=5000
+        )
+    except Exception:
         raise RuntimeError(
-            f"Could not find button to activate room '{room_name}'"
+            f"Could not find activation button for room '{room_name}'"
         )
 
-    active_button.first.click()
-
-    page.wait_for_timeout(1500)
+    active_button.first.click(
+        timeout=5000,
+        force=True
+    )
 
     print(f"Room '{room_name}' selected")
 
-    return room_card
+    page.wait_for_timeout(1000)
 
 
 def inspect_favorites(page):
