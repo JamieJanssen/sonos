@@ -470,111 +470,19 @@ class SonosController:
                 wait_until="domcontentloaded",
             )
 
-            # Sonos renders service tiles in a way where the visible label
-            # is not always one contiguous text node. Inspect clickable
-            # elements and include aria/title/descendant image alt text.
-            clicked = False
-            clickables = self.page.locator(
-                "button, a, [role='button']"
+            sonos_radio = self.page.locator(
+                'button[aria-label="Sonos Radio"]'
             )
 
-            for i in range(clickables.count()):
-                candidate = clickables.nth(i)
+            sonos_radio.first.wait_for(
+                state="visible",
+                timeout=15000,
+            )
 
-                try:
-                    if not candidate.is_visible():
-                        continue
-
-                    text = (candidate.inner_text() or "").strip()
-                    aria = candidate.get_attribute("aria-label") or ""
-                    title = candidate.get_attribute("title") or ""
-
-                    img_alt = ""
-                    images = candidate.locator("img")
-
-                    for j in range(images.count()):
-                        img_alt += " " + (
-                            images.nth(j).get_attribute("alt") or ""
-                        )
-
-                    haystack = (
-                        f"{text} {aria} {title} {img_alt}"
-                    ).lower()
-
-                    if "sonos" in haystack and "radio" in haystack:
-                        candidate.click(
-                            timeout=5000,
-                            force=True,
-                        )
-                        clicked = True
-                        break
-
-                except Exception:
-                    pass
-
-            if not clicked:
-                # Last fallback: some service cards are plain containers with
-                # pointer handlers rather than semantic buttons/links.
-                all_nodes = self.page.locator(
-                    "div, section, article"
-                )
-
-                for i in range(all_nodes.count()):
-                    candidate = all_nodes.nth(i)
-
-                    try:
-                        if not candidate.is_visible():
-                            continue
-
-                        text = (candidate.inner_text() or "").strip().lower()
-
-                        if (
-                            "sonos" in text and
-                            "radio" in text and
-                            len(text) < 100
-                        ):
-                            candidate.click(
-                                timeout=3000,
-                                force=True,
-                            )
-                            clicked = True
-                            break
-
-                    except Exception:
-                        pass
-
-            if not clicked:
-                # Return enough UI detail to identify the service card
-                # without another blind selector change.
-                visible = []
-
-                for i in range(min(clickables.count(), 100)):
-                    candidate = clickables.nth(i)
-
-                    try:
-                        if not candidate.is_visible():
-                            continue
-
-                        visible.append({
-                            "text": (
-                                candidate.inner_text() or ""
-                            ).strip()[:200],
-                            "aria": (
-                                candidate.get_attribute("aria-label")
-                                or ""
-                            ),
-                            "title": (
-                                candidate.get_attribute("title")
-                                or ""
-                            ),
-                        })
-                    except Exception:
-                        pass
-
-                raise RuntimeError(
-                    "Sonos Radio service tile not found; "
-                    f"visible controls={visible}"
-                )
+            sonos_radio.first.click(
+                timeout=5000,
+                force=True,
+            )
 
             service_url = self.page.url
 
