@@ -1,6 +1,7 @@
 import queue
 import threading
 import uuid
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
 
@@ -16,6 +17,7 @@ SONOS_API_TOKEN = getattr(credentials, "SONOS_API_TOKEN", "")
 
 PROFILE_DIR = "/home/jamie/sonos/profile"
 WEB_APP_URL = "https://play.sonos.com/en-us/web-app"
+WS_LOG = "/home/jamie/sonos/websocket.log"
 
 STATIONS = {
     "Qmusic": {
@@ -86,6 +88,19 @@ WEBSOCKET_HOOK = r"""
 app = FastAPI(title="Sonos Controller")
 
 
+def _log_ws(direction, url, payload):
+    if isinstance(payload, bytes):
+        payload = payload.hex()
+
+    line = (
+        f"{datetime.now().isoformat(timespec='milliseconds')} "
+        f"{direction} {url} {payload}"
+    )
+
+    with open(WS_LOG, "a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
 @dataclass
 class Job:
     action: str
@@ -129,6 +144,8 @@ class SonosController:
                     if self.context.pages
                     else self.context.new_page()
                 )
+
+                self.page.on("websocket", self._on_websocket)
 
                 self._ensure_web_app()
                 self._wait_for_websocket()
@@ -200,6 +217,25 @@ class SonosController:
             raise job.error
 
         return job.result
+
+    def _on_websocket(self, websocket):
+        websocket.on(
+            "framesent",
+            lambda payload: _log_ws(
+                ">>",
+                websocket.url,
+                payload,
+            ),
+        )
+
+        websocket.on(
+            "framereceived",
+            lambda payload: _log_ws(
+                "<<",
+                websocket.url,
+                payload,
+            ),
+        )
 
     def _ensure_web_app(self):
         print("Opening Sonos Web App...")
