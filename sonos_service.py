@@ -1,5 +1,6 @@
 import queue
 import threading
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,8 +16,28 @@ SONOS_API_TOKEN = getattr(credentials, "SONOS_API_TOKEN", "")
 
 PROFILE_DIR = "/home/jamie/sonos/profile"
 WEB_APP_URL = "https://play.sonos.com/en-us/web-app"
+WS_LOG = "/home/jamie/sonos/websocket.log"
+WS_DEBUG = getattr(credentials, "SONOS_WS_DEBUG", True)
 
 app = FastAPI(title="Sonos Controller")
+
+
+def _format_ws_payload(payload):
+    if isinstance(payload, bytes):
+        return payload.hex()
+    return str(payload)
+
+
+def _log_ws(direction, url, payload):
+    line = (
+        f"{datetime.now().isoformat(timespec='milliseconds')} "
+        f"{direction} {url} {_format_ws_payload(payload)}"
+    )
+
+    print(line)
+
+    with open(WS_LOG, "a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
 
 
 @dataclass
@@ -56,6 +77,9 @@ class SonosController:
                     if self.context.pages
                     else self.context.new_page()
                 )
+
+                if WS_DEBUG:
+                    self.page.on("websocket", self._on_websocket)
 
                 self._ensure_web_app()
                 self.ready.set()
@@ -115,6 +139,34 @@ class SonosController:
             raise job.error
 
         return job.result
+
+    def _on_websocket(self, websocket):
+        print(f"WebSocket opened: {websocket.url}")
+
+        websocket.on(
+            "framesent",
+            lambda payload: _log_ws(
+                ">>",
+                websocket.url,
+                payload,
+            ),
+        )
+
+        websocket.on(
+            "framereceived",
+            lambda payload: _log_ws(
+                "<<",
+                websocket.url,
+                payload,
+            ),
+        )
+
+        websocket.on(
+            "close",
+            lambda: print(
+                f"WebSocket closed: {websocket.url}"
+            ),
+        )
 
     def _ensure_web_app(self):
         print("Opening Sonos Web App...")
@@ -537,6 +589,23 @@ def sonos_status(
     return {
         "ok": True,
         "status": "ready",
+        "websocket_debug": WS_DEBUG,
+        "websocket_log": WS_LOG if WS_DEBUG else None,
+    }
+
+
+@app.post("/sonos/websocket/clear")
+def clear_websocket_log(
+    token: str = Query(""),
+):
+    _check_token(token)
+
+    with open(WS_LOG, "w", encoding="utf-8"):
+        pass
+
+    return {
+        "ok": True,
+        "cleared": WS_LOG,
     }
 
 
