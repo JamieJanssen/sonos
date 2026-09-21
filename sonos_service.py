@@ -541,20 +541,49 @@ class SonosController:
 
             service_url = self.page.url
 
-            view_all = self.page.get_by_role(
+            view_all_buttons = self.page.get_by_role(
                 "button",
                 name="View All",
-            ).first
-
-            view_all.wait_for(
-                state="visible",
-                timeout=10000,
             )
 
-            view_all.click(
-                timeout=5000,
-                force=True,
-            )
+            view_all_sections = []
+
+            for i in range(view_all_buttons.count()):
+                button = view_all_buttons.nth(i)
+
+                try:
+                    if not button.is_visible():
+                        continue
+
+                    context = button.evaluate(
+                        """(el) => {
+                            let node = el;
+
+                            for (let depth = 0; depth < 8 && node; depth++) {
+                                const text = (node.innerText || "").trim();
+
+                                if (text && text !== "View All") {
+                                    return text.slice(0, 1000);
+                                }
+
+                                node = node.parentElement;
+                            }
+
+                            return "";
+                        }"""
+                    )
+
+                    view_all_sections.append({
+                        "index": i,
+                        "context": context,
+                    })
+                except Exception:
+                    pass
+
+            if not view_all_sections:
+                raise RuntimeError(
+                    "No visible View All buttons found in Sonos Radio"
+                )
 
             self.page.wait_for_timeout(1500)
             favorites_url = self.page.url
@@ -706,6 +735,7 @@ class SonosController:
                 "favorites_url": favorites_url,
                 "favorites_resource": favorites_resource,
                 "stations": stations,
+                "view_all_sections": view_all_sections,
                 "visible_controls": visible_controls,
                 "sonos_radio_responses": sonos_radio_responses,
             }
