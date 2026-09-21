@@ -161,20 +161,29 @@ def play_favorite(page, station_name):
 
     print(f"Favorite '{station_name}' selected")
 
-    # Wait until the station detail view is actually present.
-    page.get_by_text(station_name, exact=True).last.wait_for(
-        state="visible",
-        timeout=10000
-    )
+    # The station name already exists in Favorites/Recently Played, so it is
+    # not sufficient to prove that the detail page opened. "About" is part
+    # of the station detail view and gives us a unique readiness signal.
+    try:
+        page.get_by_text("About", exact=True).wait_for(
+            state="visible",
+            timeout=10000
+        )
+    except Exception:
+        raise RuntimeError(
+            f"Station detail page for '{station_name}' did not open"
+        )
+
+    print(f"Station detail page for '{station_name}' opened")
 
 
 def press_station_play(page, station_name):
     print(f"\nLooking for station controls on '{station_name}'...")
 
-    title = page.get_by_text(station_name, exact=True)
+    about = page.get_by_text("About", exact=True)
 
     try:
-        title.first.wait_for(
+        about.wait_for(
             state="visible",
             timeout=10000
         )
@@ -185,15 +194,18 @@ def press_station_play(page, station_name):
 
     detail = None
 
-    for level in range(1, 8):
-        candidate = title.first.locator(
+    # Start from the unique About section and walk upward until we have the
+    # station detail container with its controls.
+    for level in range(1, 9):
+        candidate = about.locator(
             f"xpath=ancestor::*[{level}]"
         )
 
         try:
+            text = candidate.inner_text()
             buttons = candidate.locator("button")
 
-            if buttons.count() >= 2:
+            if station_name in text and buttons.count() >= 1:
                 detail = candidate
                 break
         except Exception:
@@ -201,12 +213,15 @@ def press_station_play(page, station_name):
 
     if detail is None:
         raise RuntimeError(
-            f"Could not find station controls for '{station_name}'"
+            f"Could not find station detail controls for '{station_name}'"
         )
 
     buttons = detail.locator("button")
+    about_box = about.bounding_box()
 
-    print("Station buttons found:", buttons.count())
+    print("Station detail buttons found:", buttons.count())
+
+    candidates = []
 
     for i in range(buttons.count()):
         button = buttons.nth(i)
@@ -218,17 +233,38 @@ def press_station_play(page, station_name):
 
         aria = button.get_attribute("aria-label")
         title_attr = button.get_attribute("title")
+        box = button.bounding_box()
 
         print(
             f"Station button {i}: "
             f"text={text!r}, "
             f"aria-label={aria!r}, "
-            f"title={title_attr!r}"
+            f"title={title_attr!r}, "
+            f"box={box!r}"
         )
 
-    # On the Sonos station detail page the first control is Play
-    # and the second control is the overflow ("...") menu.
-    play_button = buttons.first
+        label = ((aria or "") + " " + (title_attr or "")).lower()
+
+        # Prefer an explicit accessibility label if Sonos provides one.
+        if "play" in label:
+            button.click(timeout=5000, force=True)
+            print(f"Play clicked for '{station_name}'")
+            return
+
+        # Otherwise keep controls that are above the About section. In the
+        # station detail layout these are Play, overflow and close.
+        if box and about_box and box["y"] < about_box["y"]:
+            candidates.append((box["x"], button))
+
+    if not candidates:
+        raise RuntimeError(
+            f"No station controls found above About for '{station_name}'"
+        )
+
+    # Play is the left-most control in the station detail header. The overflow
+    # menu is immediately to its right and Close is at the far right.
+    candidates.sort(key=lambda item: item[0])
+    play_button = candidates[0][1]
 
     play_button.click(
         timeout=5000,
