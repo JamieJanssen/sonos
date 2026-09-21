@@ -46,6 +46,30 @@ WEBSOCKET_HOOK = r"""
                 const url = String(args[0] || "");
                 if (url.includes("api.ws.sonos.com/websocket")) {
                     window.__sonosWebSocket = ws;
+                    window.__sonosPlaybackStatus =
+                        window.__sonosPlaybackStatus || {};
+
+                    ws.addEventListener("message", (event) => {
+                        let data;
+
+                        try {
+                            data = JSON.parse(event.data);
+                        } catch (_) {
+                            return;
+                        }
+
+                        if (
+                            Array.isArray(data) &&
+                            data[0] &&
+                            data[0].namespace === "playbackExtended" &&
+                            data[0].name === "extendedPlaybackStatus" &&
+                            data[0].groupId
+                        ) {
+                            window.__sonosPlaybackStatus[
+                                data[0].groupId
+                            ] = data[1] || {};
+                        }
+                    });
                 }
             } catch (_) {
             }
@@ -385,6 +409,43 @@ class SonosController:
 
         return self.groups
 
+    def _wait_for_station_playing(
+        self,
+        group_id,
+        station_name,
+        timeout=4000,
+    ):
+        try:
+            self.page.wait_for_function(
+                """({groupId, stationName}) => {
+                    const status =
+                        window.__sonosPlaybackStatus &&
+                        window.__sonosPlaybackStatus[groupId];
+
+                    if (!status) {
+                        return false;
+                    }
+
+                    const playback = status.playback || {};
+                    const metadata = status.metadata || {};
+                    const container = metadata.container || {};
+
+                    return (
+                        playback.playbackState ===
+                            "PLAYBACK_STATE_PLAYING" &&
+                        container.name === stationName
+                    );
+                }""",
+                arg={
+                    "groupId": group_id,
+                    "stationName": station_name,
+                },
+                timeout=timeout,
+            )
+            return True
+        except Exception:
+            return False
+
     def _play(self, room_name, station_name):
         if station_name not in STATIONS:
             raise RuntimeError(
@@ -429,6 +490,16 @@ class SonosController:
 
         try:
             load_content(group_id)
+
+            if not self._wait_for_station_playing(
+                group_id,
+                station_name,
+            ):
+                raise RuntimeError(
+                    "Sonos accepted loadContent but playback "
+                    "did not switch to the requested station"
+                )
+
         except Exception as first_error:
             # A Sonos load can occasionally fail transiently ("Something went
             # wrong"). Refresh the current group id and retry once.
@@ -444,6 +515,15 @@ class SonosController:
 
             group_id = self.groups[room_name]["id"]
             load_content(group_id)
+
+            if not self._wait_for_station_playing(
+                group_id,
+                station_name,
+            ):
+                raise RuntimeError(
+                    "Sonos playback retry did not switch to "
+                    "the requested station"
+                )
 
         print(
             f"Playing '{station_name}' on "
