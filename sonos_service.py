@@ -170,6 +170,8 @@ class SonosController:
                                 "ok": True,
                                 "rooms": sorted(self.groups),
                             }
+                        elif job.action == "debug_favorites":
+                            job.result = self._debug_favorites()
                         else:
                             raise RuntimeError(
                                 f"Unsupported action: {job.action}"
@@ -445,6 +447,101 @@ class SonosController:
 
         return self.groups
 
+    def _debug_favorites(self):
+        requests = []
+
+        def capture_request(request):
+            if request.resource_type in {
+                "document",
+                "xhr",
+                "fetch",
+            }:
+                requests.append({
+                    "type": request.resource_type,
+                    "method": request.method,
+                    "url": request.url,
+                })
+
+        self.page.on("request", capture_request)
+
+        try:
+            self.page.goto(
+                WEB_APP_URL,
+                wait_until="domcontentloaded",
+            )
+
+            sonos_radio = self.page.get_by_text(
+                "Sonos Radio",
+                exact=True,
+            )
+
+            sonos_radio.last.wait_for(
+                state="visible",
+                timeout=15000,
+            )
+
+            sonos_radio.last.click(
+                timeout=5000,
+                force=True,
+            )
+
+            service_url = self.page.url
+
+            favorites = self.page.get_by_text(
+                "Favorites",
+                exact=True,
+            )
+
+            favorites.first.wait_for(
+                state="visible",
+                timeout=15000,
+            )
+
+            favorites.first.click(
+                timeout=5000,
+                force=True,
+            )
+
+            self.page.get_by_text(
+                "SLAM!",
+                exact=True,
+            ).first.wait_for(
+                state="visible",
+                timeout=15000,
+            )
+
+            favorites_url = self.page.url
+
+            # Keep only useful network calls and remove duplicates.
+            seen = set()
+            useful = []
+
+            for item in requests:
+                key = (
+                    item["type"],
+                    item["method"],
+                    item["url"],
+                )
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                useful.append(item)
+
+            return {
+                "ok": True,
+                "service_url": service_url,
+                "favorites_url": favorites_url,
+                "requests": useful[-100:],
+            }
+
+        finally:
+            self.page.remove_listener(
+                "request",
+                capture_request,
+            )
+
     def _wait_for_station_playing(
         self,
         group_id,
@@ -625,6 +722,14 @@ def sonos_rooms(
 ):
     _check_token(token)
     return _run_controller("rooms")
+
+
+@app.get("/sonos/debug/favorites")
+def sonos_debug_favorites(
+    token: str = Query(""),
+):
+    _check_token(token)
+    return _run_controller("debug_favorites")
 
 
 @app.get("/sonos/status")
