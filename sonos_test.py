@@ -53,7 +53,6 @@ def select_room(page, room_name):
 
     print(f"Room '{room_name}' selected")
 
-    page.wait_for_timeout(1000)
 
 
 def inspect_favorites(page):
@@ -61,14 +60,17 @@ def inspect_favorites(page):
 
     favorites = page.get_by_text("Sonos Favorites", exact=True)
 
-    print("Favorites matches:", favorites.count())
-
-    if favorites.count() == 0:
+    try:
+        favorites.first.wait_for(
+            state="visible",
+            timeout=10000
+        )
+    except Exception:
         print("Sonos Favorites section not found")
         return None
 
+    print("Favorites matches:", favorites.count())
     favorites.first.scroll_into_view_if_needed()
-    page.wait_for_timeout(500)
 
     for level in range(1, 7):
         try:
@@ -92,11 +94,15 @@ def play_favorite(page, station_name):
 
     favorites = page.get_by_text("Sonos Favorites", exact=True)
 
-    if favorites.count() == 0:
+    try:
+        favorites.first.wait_for(
+            state="visible",
+            timeout=10000
+        )
+    except Exception:
         raise RuntimeError("Sonos Favorites section not found")
 
     favorites.first.scroll_into_view_if_needed()
-    page.wait_for_timeout(500)
 
     favorites_section = None
 
@@ -143,12 +149,9 @@ def play_favorite(page, station_name):
         )
 
     station.first.scroll_into_view_if_needed()
-    page.wait_for_timeout(300)
     station.first.click()
 
     print(f"Clicked favorite '{station_name}'")
-
-    page.wait_for_timeout(2000)
 
 
 def press_station_play(page, station_name):
@@ -334,7 +337,10 @@ with sync_playwright() as p:
             name="Sign in"
         ).click()
 
-        page.wait_for_timeout(5000)
+        page.wait_for_function(
+            "() => window.location.hostname !== 'login.sonos.com'",
+            timeout=30000
+        )
 
         if "idassets.sonos.com/welcome" in page.url:
             print("Clicking Continue...")
@@ -342,7 +348,6 @@ with sync_playwright() as p:
                 "button",
                 name="Continue"
             ).click()
-            page.wait_for_timeout(2000)
 
         page.goto(
             "https://play.sonos.com/en-us/web-app",
@@ -362,19 +367,29 @@ with sync_playwright() as p:
 
     select_room(page, ROOM)
 
-    print("\nScrolling down to load Favorites...")
+    print("\nLoading Sonos Favorites...")
 
-    for _ in range(8):
-        page.mouse.wheel(0, 1000)
-        page.wait_for_timeout(300)
+    favorites = page.get_by_text("Sonos Favorites", exact=True)
 
-    page.wait_for_timeout(1000)
+    if favorites.count() == 0:
+        page.keyboard.press("End")
+
+    try:
+        favorites.first.wait_for(
+            state="visible",
+            timeout=10000
+        )
+    except Exception:
+        # Some Sonos layouts lazy-load while scrolling rather than on End.
+        for _ in range(20):
+            page.mouse.wheel(0, 1000)
+            if favorites.count() > 0:
+                break
+            page.wait_for_timeout(100)
 
     inspect_favorites(page)
     play_favorite(page, STATION)
     press_station_play(page, STATION)
-
-    page.wait_for_timeout(3000)
 
     page.screenshot(
         path=SCREENSHOT,
