@@ -151,6 +151,40 @@ def play_favorite(page, station_name):
     page.wait_for_timeout(2000)
 
 
+def press_station_play(page, station_name):
+    print(f"\nLooking for Play button on '{station_name}'...")
+
+    play_button = page.get_by_role(
+        "button",
+        name="Play",
+        exact=True
+    )
+
+    try:
+        play_button.first.wait_for(
+            state="visible",
+            timeout=10000
+        )
+    except Exception:
+        # Fallback to an aria-label based selector in case Sonos changes roles.
+        play_button = page.locator(
+            'button[aria-label="Play"]'
+        )
+
+        try:
+            play_button.first.wait_for(
+                state="visible",
+                timeout=5000
+            )
+        except Exception:
+            raise RuntimeError(
+                f"Play button not found on station '{station_name}'"
+            )
+
+    play_button.first.click(timeout=5000)
+    print(f"Play clicked for '{station_name}'")
+
+
 def press_play_for_room(page, room_name):
     print(f"\nChecking playback state for '{room_name}'...")
 
@@ -302,7 +336,7 @@ with sync_playwright() as p:
 
     inspect_favorites(page)
     play_favorite(page, STATION)
-    press_play_for_room(page, ROOM)
+    press_station_play(page, STATION)
 
     page.wait_for_timeout(3000)
 
