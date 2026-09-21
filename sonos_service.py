@@ -564,18 +564,9 @@ class SonosController:
         try:
             load_content(group_id)
 
-            if not self._wait_for_station_playing(
-                group_id,
-                station_name,
-            ):
-                raise RuntimeError(
-                    "Sonos accepted loadContent but playback "
-                    "did not switch to the requested station"
-                )
-
         except Exception as first_error:
-            # A Sonos load can occasionally fail transiently ("Something went
-            # wrong"). Refresh the current group id and retry once.
+            # A Sonos load can occasionally fail transiently. Refresh the
+            # current group id and retry once.
             print(
                 f"Play failed for '{station_name}' on '{room_name}', "
                 f"retrying once: {first_error}"
@@ -588,15 +579,6 @@ class SonosController:
 
             group_id = self.groups[room_name]["id"]
             load_content(group_id)
-
-            if not self._wait_for_station_playing(
-                group_id,
-                station_name,
-            ):
-                raise RuntimeError(
-                    "Sonos playback retry did not switch to "
-                    "the requested station"
-                )
 
         print(
             f"Playing '{station_name}' on "
