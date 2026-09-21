@@ -81,6 +81,7 @@ class SonosController:
         self.ready = threading.Event()
         self.startup_error = None
         self.household_id = None
+        self.groups = {}
 
         self.thread = threading.Thread(
             target=self._worker,
@@ -108,6 +109,7 @@ class SonosController:
                 self._ensure_web_app()
                 self._wait_for_websocket()
                 self._refresh_household()
+                self._refresh_groups()
 
                 print("Sonos service ready")
                 self.ready.set()
@@ -122,11 +124,10 @@ class SonosController:
                                 job.station,
                             )
                         elif job.action == "rooms":
+                            self._refresh_groups()
                             job.result = {
                                 "ok": True,
-                                "rooms": sorted(
-                                    self._get_groups().keys()
-                                ),
+                                "rooms": sorted(self.groups),
                             }
                         else:
                             raise RuntimeError(
@@ -359,7 +360,7 @@ class SonosController:
 
         self.household_id = households[0]["id"]
 
-    def _get_groups(self):
+    def _refresh_groups(self):
         if not self.household_id:
             self._refresh_household()
 
@@ -376,11 +377,13 @@ class SonosController:
 
         groups = result[1].get("groups", [])
 
-        return {
+        self.groups = {
             group["name"]: group
             for group in groups
             if group.get("name") and group.get("id")
         }
+
+        return self.groups
 
     def _play(self, room_name, station_name):
         if station_name not in STATIONS:
@@ -389,37 +392,53 @@ class SonosController:
                 f"Available: {', '.join(STATIONS)}"
             )
 
-        groups = self._get_groups()
+        if room_name not in self.groups:
+            self._refresh_groups()
 
-        if room_name not in groups:
+        if room_name not in self.groups:
             raise RuntimeError(
                 f"Unknown room '{room_name}'. "
-                f"Available: {', '.join(sorted(groups))}"
+                f"Available: {', '.join(sorted(self.groups))}"
             )
 
-        group_id = groups[room_name]["id"]
         station = STATIONS[station_name]
 
-        self._ws_request(
-            namespace="playback",
-            command="loadContent",
-            target={
-                "groupId": group_id,
-            },
-            body={
-                "type": "STREAM",
-                "id": {
-                    "objectId": station["objectId"],
-                    "accountId": station["accountId"],
-                    "serviceId": station["serviceId"],
+        def load_content(group_id):
+            return self._ws_request(
+                namespace="playback",
+                command="loadContent",
+                target={
+                    "groupId": group_id,
                 },
-                "playbackAction": "PLAY",
-                "playModes": {
-                    "shuffle": False,
+                body={
+                    "type": "STREAM",
+                    "id": {
+                        "objectId": station["objectId"],
+                        "accountId": station["accountId"],
+                        "serviceId": station["serviceId"],
+                    },
+                    "playbackAction": "PLAY",
+                    "playModes": {
+                        "shuffle": False,
+                    },
+                    "queueAction": "REPLACE",
                 },
-                "queueAction": "REPLACE",
-            },
-        )
+            )
+
+        group_id = self.groups[room_name]["id"]
+
+        try:
+            load_content(group_id)
+        except Exception:
+            # The cached group id can become stale after grouping or
+            # ungrouping speakers. Refresh once and retry automatically.
+            self._refresh_groups()
+
+            if room_name not in self.groups:
+                raise
+
+            group_id = self.groups[room_name]["id"]
+            load_content(group_id)
 
         print(
             f"Playing '{station_name}' on "
