@@ -152,7 +152,7 @@ def play_favorite(page, station_name):
 
 
 def press_play_for_room(page, room_name):
-    print(f"\nLooking for Play button for '{room_name}'...")
+    print(f"\nChecking playback state for '{room_name}'...")
 
     room = page.get_by_text(room_name, exact=True)
 
@@ -186,36 +186,42 @@ def press_play_for_room(page, room_name):
             f"title={title!r}"
         )
 
-    play_button = room_card.get_by_role(
-        "button",
-        name="Play"
+    # If Sonos shows a Stop button, playback is already active.
+    stop_button = room_card.locator(
+        f'button[aria-label="Stop group {room_name}"]'
     )
 
-    print("Exact Play buttons found:", play_button.count())
+    if stop_button.count() > 0:
+        print(f"'{room_name}' is already playing")
+        return
+
+    # When stopped, Sonos labels the control as "Play group <room>".
+    play_button = room_card.locator(
+        f'button[aria-label="Play group {room_name}"]'
+    )
 
     if play_button.count() > 0:
-        play_button.first.click()
+        play_button.first.click(timeout=5000)
         print(f"Play clicked for '{room_name}'")
         return
 
+    # Fallback for future Sonos UI changes.
     for i in range(buttons.count()):
         button = buttons.nth(i)
 
-        aria = button.get_attribute("aria-label") or ""
-        title = button.get_attribute("title") or ""
+        aria = (button.get_attribute("aria-label") or "").lower()
+        title = (button.get_attribute("title") or "").lower()
 
-        if "play" in aria.lower() or "play" in title.lower():
-            button.click()
+        if "play" in aria or "play" in title:
+            button.click(timeout=5000)
             print(
                 f"Play clicked for '{room_name}' using fallback button {i}"
             )
             return
 
     raise RuntimeError(
-        f"No Play button found for room '{room_name}'"
+        f"No Play/Stop control found for room '{room_name}'"
     )
-
-
 
 
 with sync_playwright() as p:
