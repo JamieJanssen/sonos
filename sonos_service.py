@@ -58,6 +58,7 @@ class SonosController:
         self.jobs = queue.Queue()
         self.ready = threading.Event()
         self.startup_error = None
+        self.rooms = {}
         self.thread = threading.Thread(
             target=self._worker,
             name="sonos-playwright",
@@ -94,6 +95,12 @@ class SonosController:
                                 "ok": True,
                                 "room": job.room,
                                 "station": job.station,
+                            }
+                        elif job.action == "rooms":
+                            rooms = self._refresh_rooms_from_page()
+                            job.result = {
+                                "ok": True,
+                                "rooms": sorted(rooms),
                             }
                         else:
                             raise RuntimeError(
@@ -168,6 +175,29 @@ class SonosController:
             ),
         )
 
+    def _refresh_rooms_from_page(self):
+        rooms = {}
+
+        buttons = self.page.locator(
+            'button[aria-label^="Set "][aria-label$=" as active"]'
+        )
+
+        for i in range(buttons.count()):
+            button = buttons.nth(i)
+            aria = button.get_attribute("aria-label") or ""
+
+            if aria.startswith("Set ") and aria.endswith(" as active"):
+                name = aria[4:-10]
+                rooms[name] = {
+                    "name": name,
+                    "active_button": aria,
+                }
+
+        if rooms:
+            self.rooms = rooms
+
+        return self.rooms
+
     def _ensure_web_app(self):
         print("Opening Sonos Web App...")
 
@@ -179,6 +209,7 @@ class SonosController:
 
         if self._has_any_room(timeout=10000):
             print("Existing Sonos session is valid")
+            self._refresh_rooms_from_page()
             return
 
         print("Session expired or not available, logging in...")
@@ -217,6 +248,7 @@ class SonosController:
                 "Logged in, but Sonos rooms did not appear"
             )
 
+        self._refresh_rooms_from_page()
         print("Logged in successfully")
 
     def _has_any_room(self, timeout=5000):
@@ -555,6 +587,53 @@ def sonos_play(
             room=room,
             station=station,
         )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
+
+
+@app.get("/sonos/rooms")
+def sonos_rooms(
+    token: str = Query(""),
+):
+    _check_token(token)
+
+    if not controller.ready.wait(timeout=45):
+        raise HTTPException(
+            status_code=503,
+            detail="Sonos controller is still starting",
+        )
+
+    if controller.startup_error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(controller.startup_error),
+        )
+
+    try:
+        job = Job(
+            action="rooms",
+            room="",
+        )
+        controller.jobs.put(job)
+
+        if not job.done.wait(timeout=15):
+            raise TimeoutError("Room query timed out")
+
+        if job.error:
+            raise job.error
+
+        return {
+            "ok": True,
+            "rooms": job.result["rooms"],
+        }
     except TimeoutError as exc:
         raise HTTPException(
             status_code=504,
