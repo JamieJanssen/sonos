@@ -1,11 +1,12 @@
 import os
+import sys
 from playwright.sync_api import sync_playwright
 
 SONOS_EMAIL = os.environ.get("SONOS_EMAIL", "jamie@itsjamie.com")
 SONOS_PASSWORD = os.environ.get("SONOS_PASSWORD", "")
 
-ROOM = "Keuken"
-STATION = "Radio 10"
+ROOM = sys.argv[1] if len(sys.argv) > 1 else "Keuken"
+STATION = sys.argv[2] if len(sys.argv) > 2 else "Radio 10"
 
 SCREENSHOT = "/home/jamie/sonos-debug.png"
 HTML = "/home/jamie/sonos-debug.html"
@@ -51,19 +52,19 @@ def select_room(page, room_name):
     except Exception as e:
         print("Could not read room card:", e)
 
-    box = room_card.bounding_box()
+    active_button = page.get_by_role(
+        "button",
+        name=f"Set {room_name} as active"
+    )
 
-    if not box:
+    print("Active room buttons found:", active_button.count())
+
+    if active_button.count() == 0:
         raise RuntimeError(
-            f"Could not determine bounds for room '{room_name}'"
+            f"Could not find button to activate room '{room_name}'"
         )
 
-    room_card.click(
-        position={
-            "x": box["width"] * 0.55,
-            "y": min(60, box["height"] / 2)
-        }
-    )
+    active_button.first.click()
 
     page.wait_for_timeout(1500)
 
