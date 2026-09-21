@@ -70,7 +70,18 @@ def inspect_favorites(page):
         return None
 
     print("Favorites matches:", favorites.count())
-    favorites.first.scroll_into_view_if_needed()
+
+    # Sonos may re-render this section after room selection. Re-acquire the
+    # locator before scrolling so we do not hold a detached DOM node.
+    favorites = page.get_by_text("Sonos Favorites", exact=True)
+
+    try:
+        favorites.first.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        # If the section was re-rendered again, resolve it once more.
+        favorites = page.get_by_text("Sonos Favorites", exact=True)
+        favorites.first.wait_for(state="visible", timeout=10000)
+        favorites.first.scroll_into_view_if_needed(timeout=5000)
 
     for level in range(1, 7):
         try:
@@ -102,7 +113,16 @@ def play_favorite(page, station_name):
     except Exception:
         raise RuntimeError("Sonos Favorites section not found")
 
-    favorites.first.scroll_into_view_if_needed()
+    # Re-acquire because Sonos can replace the Favorites subtree while the
+    # page is settling.
+    favorites = page.get_by_text("Sonos Favorites", exact=True)
+
+    try:
+        favorites.first.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        favorites = page.get_by_text("Sonos Favorites", exact=True)
+        favorites.first.wait_for(state="visible", timeout=10000)
+        favorites.first.scroll_into_view_if_needed(timeout=5000)
 
     favorites_section = None
 
