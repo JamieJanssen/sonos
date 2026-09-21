@@ -59,12 +59,12 @@ def select_room(page, room_name):
 def inspect_favorites(page):
     print("\nLooking for Favorites...")
 
-    favorites = page.get_by_text("Favorites", exact=True)
+    favorites = page.get_by_text("Sonos Favorites", exact=True)
 
     print("Favorites matches:", favorites.count())
 
     if favorites.count() == 0:
-        print("Favorites section not found")
+        print("Sonos Favorites section not found")
         return None
 
     favorites.first.scroll_into_view_if_needed()
@@ -90,10 +90,10 @@ def inspect_favorites(page):
 def play_favorite(page, station_name):
     print(f"\nLooking for favorite '{station_name}'...")
 
-    favorites = page.get_by_text("Favorites", exact=True)
+    favorites = page.get_by_text("Sonos Favorites", exact=True)
 
     if favorites.count() == 0:
-        raise RuntimeError("Favorites section not found")
+        raise RuntimeError("Sonos Favorites section not found")
 
     favorites.first.scroll_into_view_if_needed()
     page.wait_for_timeout(500)
