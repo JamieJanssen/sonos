@@ -493,13 +493,9 @@ class SonosController:
                     }
 
                     const playback = status.playback || {};
-                    const metadata = status.metadata || {};
-                    const container = metadata.container || {};
-
                     return (
                         playback.playbackState ===
-                            "PLAYBACK_STATE_PLAYING" &&
-                        container.name === stationName
+                            "PLAYBACK_STATE_PLAYING"
                     );
                 }""",
                 arg={
